@@ -1,0 +1,91 @@
+[project]
+name = "deepagent-code-assistant"
+version = "0.1.0"
+description = "DeepAgentic Code Assistant - Python code analysis and refactoring agent"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11,<4.0"
+authors = [
+    { name = "DeepAgent Team" }
+]
+
+dependencies = [
+    "deepagents>=0.2.0",
+    "langchain-openai>=1.0.0",
+    "python-dotenv>=1.0.0",
+    "wcmatch>=8.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pyright>=1.1.0",
+    "langgraph-cli[inmem]>=0.1.0",
+]
+
+[project.scripts]
+coding-assistant = "run_cli:main"
+
+[build-system]
+requires = ["setuptools>=73.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["coding_agent", "run_cli", "optimizations"]
+
+[tool.setuptools.package-data]
+"*" = ["*.env", "*.json", "*.md"]
+
+# Pytest configuration
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--showlocals",
+]
+
+# Pyright configuration
+[tool.pyright]
+include = ["*.py"]
+exclude = [
+    "**/__pycache__",
+    ".venv",
+]
+pythonVersion = "3.11"
+typeCheckingMode = "basic"
+reportMissingImports = true
+reportMissingTypeStubs = false
+
+# Ruff configuration
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+# 검사 대상 경로
+src = ["src", "tests"]
+
+[tool.ruff.format]
+# 기본 포매터 설정(black 유사 스타일)
+quote-style = "double"
+indent-style = "space"
+
+[tool.ruff.lint]
+# 사용할 규칙셋
+select = [
+    "E",   # pycodestyle (PEP8)
+    "F",   # pyflakes
+    "D",   # pydocstyle (Docstring)
+]
+
+ignore = [
+    "D100",  # 모듈 docstring 없음 허용
+    "D104",  # 패키지 docstring 없음 허용
+]
+
+[tool.ruff.lint.pydocstyle]
+# Google 스타일 Docstring
+convention = "google"

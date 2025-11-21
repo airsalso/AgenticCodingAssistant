@@ -32,7 +32,7 @@ class StateBackend:
     def __init__(self, runtime: "ToolRuntime"):
         """런타임 핸들을 받아 상태 백엔드를 초기화한다."""
         self.runtime = runtime
-    
+
     def ls_info(self, path: str) -> list[FileInfo]:
         """상태에 저장된 파일 목록을 반환한다."""
         files = self.runtime.state.get("files", {})
@@ -51,7 +51,7 @@ class StateBackend:
         return infos
 
     # 간결한 API 유지를 위해 구형 ls() 헬퍼는 제거
-    
+
     def read(
         self,
         file_path: str,
@@ -61,12 +61,12 @@ class StateBackend:
         """파일을 읽고 줄 번호를 포함한 문자열을 반환한다."""
         files = self.runtime.state.get("files", {})
         file_data = files.get(file_path)
-        
+
         if file_data is None:
             return f"Error: File '{file_path}' not found"
-        
+
         return format_read_response(file_data, offset, limit)
-    
+
     def write(
         self,
         file_path: str,
@@ -74,13 +74,13 @@ class StateBackend:
     ) -> WriteResult:
         """새 파일을 생성하고 상태 업데이트 정보를 반환한다."""
         files = self.runtime.state.get("files", {})
-        
+
         if file_path in files:
             return WriteResult(error=f"Cannot write to {file_path} because it already exists. Read and then make an edit, or write to a new path.")
-        
+
         new_file_data = create_file_data(content)
         return WriteResult(path=file_path, files_update={file_path: new_file_data})
-    
+
     def edit(
         self,
         file_path: str,
@@ -91,31 +91,53 @@ class StateBackend:
         """파일 내용에서 문자열을 치환하고 상태를 갱신한다."""
         files = self.runtime.state.get("files", {})
         file_data = files.get(file_path)
-        
+
         if file_data is None:
             return EditResult(error=f"Error: File '{file_path}' not found")
-        
+
         content = file_data_to_string(file_data)
         result = perform_string_replacement(content, old_string, new_string, replace_all)
-        
+
         if isinstance(result, str):
             return EditResult(error=result)
-        
+
         new_content, occurrences = result
         new_file_data = update_file_data(file_data, new_content)
         return EditResult(path=file_path, files_update={file_path: new_file_data}, occurrences=int(occurrences))
-    
+
+    def delete(self, file_path: str) -> str:
+        """파일을 삭제하고 결과 메시지를 반환한다.
+
+        Args:
+            file_path: 삭제할 파일 경로.
+
+        Returns:
+            성공 메시지 또는 오류 문자열.
+        """
+        files = self.runtime.state.get("files", {})
+
+        if file_path not in files:
+            return f"Error: File '{file_path}' not found"
+
+        # 상태에서 파일 삭제 (불변성 유지를 위해 복사본 생성)
+        files_copy = dict(files)
+        del files_copy[file_path]
+        self.runtime.state["files"] = files_copy
+
+        return f"Successfully deleted file: {file_path}"
+
     # 간결한 API 유지를 위해 구형 grep() 헬퍼는 제거
 
     def grep_raw(
         self,
         pattern: str,
-        path: str = "/",
+        path: Optional[str] = None,
         glob: Optional[str] = None,
     ) -> list[GrepMatch] | str:
         """상태에 저장된 파일에서 패턴 검색을 수행한다."""
         files = self.runtime.state.get("files", {})
-        return grep_matches_from_files(files, pattern, path, glob)
+        search_path = path if path is not None else "/"
+        return grep_matches_from_files(files, pattern, search_path, glob)
 
     def glob_info(self, pattern: str, path: str = "/") -> list[FileInfo]:
         """글롭 패턴에 매칭되는 파일 정보를 반환한다."""

@@ -119,5 +119,9 @@ class BackendProtocol(Protocol):
         """파일에서 문자열을 치환하고 `EditResult`를 반환한다."""
         ...
 
+    def delete(self, file_path: str) -> str:
+        """파일을 삭제하고 결과 메시지를 반환한다."""
+        ...
+
 
 BackendFactory: TypeAlias = Callable[[ToolRuntime], BackendProtocol]

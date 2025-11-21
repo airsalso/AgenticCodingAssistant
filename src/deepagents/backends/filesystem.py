@@ -10,10 +10,13 @@
 import os
 import re
 import json
+import logging
 import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional, TYPE_CHECKING
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from langchain.tools import ToolRuntime
@@ -55,6 +58,30 @@ class FilesystemBackend:
         self.virtual_mode = virtual_mode
         self.max_file_size_bytes = max_file_size_mb * 1024 * 1024
 
+    def _to_virtual_path(self, abs_path: str) -> str:
+        """절대 경로를 가상 경로로 변환한다.
+
+        Args:
+            abs_path: 절대 파일 경로
+
+        Returns:
+            `/`로 시작하는 가상 경로
+        """
+        cwd_str = str(self.cwd)
+        if not cwd_str.endswith("/"):
+            cwd_str += "/"
+
+        # 현재 작업 디렉터리 접두어 제거
+        if abs_path.startswith(cwd_str):
+            relative_path = abs_path[len(cwd_str):]
+        elif abs_path.startswith(str(self.cwd)):
+            relative_path = abs_path[len(str(self.cwd)):].lstrip("/")
+        else:
+            # 범위를 벗어난 경로는 그대로 유지
+            relative_path = abs_path
+
+        return "/" + relative_path
+
     def _resolve_path(self, key: str) -> Path:
         """보안 검사를 거쳐 파일 경로를 정규화한다.
 
@@ -70,13 +97,25 @@ class FilesystemBackend:
             정규화된 절대 `Path` 객체.
         """
         if self.virtual_mode:
+            # SECURITY: 시스템 절대 경로 차단 (WORKSPACE 외부 접근 방지)
+            # 주의: "/" 또는 "/file.txt"는 가상 경로이므로 허용
+            # "/etc/passwd" 같은 실제 시스템 경로는 차단
+
+            # 가상 경로 정규화
             vpath = key if key.startswith("/") else "/" + key
+
+            # 트래버설 시도 차단
             if ".." in vpath or vpath.startswith("~"):
                 raise ValueError("Path traversal not allowed")
+
+            # 가상 경로를 실제 경로로 변환
             full = (self.cwd / vpath.lstrip("/")).resolve()
+
+            # 최종 검증: resolve 후 workspace 내부인지 확인
             try:
                 full.relative_to(self.cwd)
             except ValueError:
+                # 이 경로는 workspace 외부를 가리킴 (보안 위반)
                 raise ValueError(f"Path outside root directory: {key}") from None
             return full
 
@@ -100,54 +139,30 @@ class FilesystemBackend:
 
         results: list[FileInfo] = []
 
-        # 현재 작업 디렉터리를 문자열로 변환하여 비교
-        cwd_str = str(self.cwd)
-        if not cwd_str.endswith("/"):
-            cwd_str += "/"
-
-        # 디렉터리 트리를 순회
+        # 한 레벨만 탐색 (재귀 X) - 성능 개선
         try:
-            for path in dir_path.rglob("*"):
-                # 파일만 추려내어 메타데이터를 수집한다
+            for item in dir_path.iterdir():
+                # 파일과 디렉토리 모두 포함
                 try:
-                    is_file = path.is_file()
+                    is_file = item.is_file()
+                    is_dir = item.is_dir()
                 except OSError:
                     continue
-                if is_file:
-                    abs_path = str(path)
-                    if not self.virtual_mode:
-                        try:
-                            st = path.stat()
-                            results.append({
-                                "path": abs_path,
-                                "is_dir": False,
-                                "size": int(st.st_size),
-                                "modified_at": datetime.fromtimestamp(st.st_mtime).isoformat(),
-                            })
-                        except OSError:
-                            results.append({"path": abs_path, "is_dir": False})
-                        continue
-                    # 현재 작업 디렉터리 접두어가 있으면 제거
-                    if abs_path.startswith(cwd_str):
-                        relative_path = abs_path[len(cwd_str):]
-                    elif abs_path.startswith(str(self.cwd)):
-                        # 작업 디렉터리 문자열이 슬래시로 끝나지 않는 경우 처리
-                        relative_path = abs_path[len(str(self.cwd)):].lstrip("/")
-                    else:
-                        # 범위를 벗어난 경로는 그대로 유지
-                        relative_path = abs_path
 
-                    virt_path = "/" + relative_path
+                if is_file or is_dir:
+                    abs_path = str(item)
+                    display_path = self._to_virtual_path(abs_path) if self.virtual_mode else abs_path
+
                     try:
-                        st = path.stat()
+                        st = item.stat()
                         results.append({
-                            "path": virt_path,
-                            "is_dir": False,
-                            "size": int(st.st_size),
+                            "path": display_path,
+                            "is_dir": is_dir,
+                            "size": int(st.st_size) if is_file else 0,
                             "modified_at": datetime.fromtimestamp(st.st_mtime).isoformat(),
                         })
                     except OSError:
-                        results.append({"path": virt_path, "is_dir": False})
+                        results.append({"path": display_path, "is_dir": is_dir})
         except (OSError, PermissionError):
             pass
 
@@ -192,19 +207,19 @@ class FilesystemBackend:
             empty_msg = check_empty_content(content)
             if empty_msg:
                 return empty_msg
-            
+
             lines = content.splitlines()
             start_idx = offset
             end_idx = min(start_idx + limit, len(lines))
-            
+
             if start_idx >= len(lines):
                 return f"Error: Line offset {offset} exceeds file length ({len(lines)} lines)"
-            
+
             selected_lines = lines[start_idx:end_idx]
             return format_content_with_line_numbers(selected_lines, start_line=start_idx + 1)
         except (OSError, UnicodeDecodeError) as e:
             return f"Error reading file '{file_path}': {e}"
-    
+
     def write(
         self,
         file_path: str,
@@ -235,11 +250,11 @@ class FilesystemBackend:
             fd = os.open(resolved_path, flags, 0o644)
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(content)
-            
+
             return WriteResult(path=file_path, files_update=None)
         except (OSError, UnicodeEncodeError) as e:
             return WriteResult(error=f"Error writing file '{file_path}': {e}")
-    
+
     def edit(
         self,
         file_path: str,
@@ -272,14 +287,14 @@ class FilesystemBackend:
             except OSError:
                 with open(resolved_path, "r", encoding="utf-8") as f:
                     content = f.read()
-            
+
             result = perform_string_replacement(content, old_string, new_string, replace_all)
-            
+
             if isinstance(result, str):
                 return EditResult(error=result)
-            
+
             new_content, occurrences = result
-            
+
             # 안전하게 쓰기
             flags = os.O_WRONLY | os.O_TRUNC
             if hasattr(os, "O_NOFOLLOW"):
@@ -287,12 +302,35 @@ class FilesystemBackend:
             fd = os.open(resolved_path, flags)
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(new_content)
-            
+
             return EditResult(path=file_path, files_update=None, occurrences=int(occurrences))
         except (OSError, UnicodeDecodeError, UnicodeEncodeError) as e:
             return EditResult(error=f"Error editing file '{file_path}': {e}")
-    
-    # Removed legacy grep() convenience to keep lean surface
+
+    def delete(self, file_path: str) -> str:
+        """파일을 삭제합니다.
+
+        Args:
+            file_path: 삭제할 파일의 경로.
+
+        Returns:
+            성공 메시지 또는 오류 문자열.
+        """
+        resolved_path = self._resolve_path(file_path)
+
+        if not resolved_path.exists():
+            return f"Error: File '{file_path}' not found"
+
+        if not resolved_path.is_file():
+            return f"Error: '{file_path}' is not a file (directories not supported)"
+
+        try:
+            resolved_path.unlink()
+            return f"Successfully deleted file: {file_path}"
+        except PermissionError:
+            return f"Error: Permission denied to delete '{file_path}'"
+        except OSError as e:
+            return f"Error deleting file '{file_path}': {e}"
 
     def grep_raw(
         self,
@@ -374,7 +412,8 @@ class FilesystemBackend:
             if self.virtual_mode:
                 try:
                     virt = "/" + str(p.resolve().relative_to(self.cwd))
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Skipping file outside workspace: {p} - {e}")
                     continue
             else:
                 virt = str(p)
@@ -417,14 +456,15 @@ class FilesystemBackend:
                     if self.virtual_mode:
                         try:
                             virt_path = "/" + str(fp.resolve().relative_to(self.cwd))
-                        except Exception:
+                        except Exception as e:
+                            logger.debug(f"Skipping file outside workspace: {fp} - {e}")
                             continue
                     else:
                         virt_path = str(fp)
                     results.setdefault(virt_path, []).append((line_num, line))
 
         return results
-    
+
     def glob_info(self, pattern: str, path: str = "/") -> list[FileInfo]:
         """글롭 패턴으로 파일 정보를 수집한다."""
         if pattern.startswith("/"):
@@ -446,38 +486,18 @@ class FilesystemBackend:
                 if not is_file:
                     continue
                 abs_path = str(matched_path)
-                if not self.virtual_mode:
-                    try:
-                        st = matched_path.stat()
-                        results.append({
-                            "path": abs_path,
-                            "is_dir": False,
-                            "size": int(st.st_size),
-                            "modified_at": datetime.fromtimestamp(st.st_mtime).isoformat(),
-                        })
-                    except OSError:
-                        results.append({"path": abs_path, "is_dir": False})
-                else:
-                    cwd_str = str(self.cwd)
-                    if not cwd_str.endswith("/"):
-                        cwd_str += "/"
-                    if abs_path.startswith(cwd_str):
-                        relative_path = abs_path[len(cwd_str):]
-                    elif abs_path.startswith(str(self.cwd)):
-                        relative_path = abs_path[len(str(self.cwd)):].lstrip("/")
-                    else:
-                        relative_path = abs_path
-                    virt = "/" + relative_path
-                    try:
-                        st = matched_path.stat()
-                        results.append({
-                            "path": virt,
-                            "is_dir": False,
-                            "size": int(st.st_size),
-                            "modified_at": datetime.fromtimestamp(st.st_mtime).isoformat(),
-                        })
-                    except OSError:
-                        results.append({"path": virt, "is_dir": False})
+                display_path = self._to_virtual_path(abs_path) if self.virtual_mode else abs_path
+
+                try:
+                    st = matched_path.stat()
+                    results.append({
+                        "path": display_path,
+                        "is_dir": False,
+                        "size": int(st.st_size),
+                        "modified_at": datetime.fromtimestamp(st.st_mtime).isoformat(),
+                    })
+                except OSError:
+                    results.append({"path": display_path, "is_dir": False})
         except (OSError, ValueError):
             pass
 

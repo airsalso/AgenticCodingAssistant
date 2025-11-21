@@ -7,7 +7,6 @@ from langchain.tools import ToolRuntime
 from deepagents.backends.protocol import BackendProtocol, BackendFactory, WriteResult, EditResult
 from deepagents.backends.state import StateBackend
 from deepagents.backends.utils import FileInfo, GrepMatch
-from deepagents.backends.protocol import BackendFactory
 
 
 class CompositeBackend:
@@ -151,7 +150,9 @@ class CompositeBackend:
             if isinstance(raw, str):
                 # 오류 발생 시 문자열 메시지를 그대로 반환
                 return raw
-            all_matches.extend({**m, "path": f"{route_prefix[:-1]}{m['path']}"} for m in raw)
+            # 타입 검증 후 dict 병합
+            if isinstance(raw, list):
+                all_matches.extend({**m, "path": f"{route_prefix[:-1]}{m['path']}"} for m in raw)
 
         return all_matches
 
@@ -251,4 +252,4 @@ class CompositeBackend:
         return res
 
 
- 
+

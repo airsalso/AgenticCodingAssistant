@@ -51,9 +51,9 @@ def format_content_with_line_numbers(
             lines = lines[:-1]
     else:
         lines = content
-    
+
     return "\n".join(
-        f"{i + start_line:{LINE_NUMBER_WIDTH}d}\t{line[:MAX_LINE_LENGTH]}" 
+        f"{i + start_line:{LINE_NUMBER_WIDTH}d}\t{line[:MAX_LINE_LENGTH]}"
         for i, line in enumerate(lines)
     )
 
@@ -88,9 +88,9 @@ def create_file_data(content: str, created_at: str | None = None) -> dict[str, A
         내용과 생성/수정 시각이 포함된 딕셔너리.
     """
     lines = content.split("\n") if isinstance(content, str) else content
-    lines = [line[i:i+MAX_LINE_LENGTH] for line in lines for i in range(0, len(line) or 1, MAX_LINE_LENGTH)]
+    lines = [line[i:i+MAX_LINE_LENGTH] for line in lines for i in range(0, max(len(line), 1), MAX_LINE_LENGTH)]
     now = datetime.now(UTC).isoformat()
-    
+
     return {
         "content": lines,
         "created_at": created_at or now,
@@ -109,9 +109,9 @@ def update_file_data(file_data: dict[str, Any], content: str) -> dict[str, Any]:
         수정된 내용과 최신 수정 시각을 포함한 `FileData`.
     """
     lines = content.split("\n") if isinstance(content, str) else content
-    lines = [line[i:i+MAX_LINE_LENGTH] for line in lines for i in range(0, len(line) or 1, MAX_LINE_LENGTH)]
+    lines = [line[i:i+MAX_LINE_LENGTH] for line in lines for i in range(0, max(len(line), 1), MAX_LINE_LENGTH)]
     now = datetime.now(UTC).isoformat()
-    
+
     return {
         "content": lines,
         "created_at": file_data["created_at"],
@@ -138,14 +138,14 @@ def format_read_response(
     empty_msg = check_empty_content(content)
     if empty_msg:
         return empty_msg
-    
+
     lines = content.splitlines()
     start_idx = offset
     end_idx = min(start_idx + limit, len(lines))
-    
+
     if start_idx >= len(lines):
         return f"Error: Line offset {offset} exceeds file length ({len(lines)} lines)"
-    
+
     selected_lines = lines[start_idx:end_idx]
     return format_content_with_line_numbers(selected_lines, start_line=start_idx + 1)
 
@@ -168,13 +168,13 @@ def perform_string_replacement(
         성공 시 `(새_문자열, 치환 횟수)` 튜플, 실패 시 오류 메시지.
     """
     occurrences = content.count(old_string)
-    
+
     if occurrences == 0:
         return f"Error: String not found in file: '{old_string}'"
-    
+
     if occurrences > 1 and not replace_all:
         return f"Error: String '{old_string}' appears {occurrences} times in file. Use replace_all=True to replace all instances, or provide a more specific string with surrounding context."
-    
+
     new_content = content.replace(old_string, new_string)
     return new_content, occurrences
 
@@ -210,12 +210,12 @@ def _validate_path(path: str | None) -> str:
     path = path or "/"
     if not path or path.strip() == "":
         raise ValueError("Path cannot be empty")
-    
+
     normalized = path if path.startswith("/") else "/" + path
-    
+
     if not normalized.endswith("/"):
         normalized += "/"
-    
+
     return normalized
 
 

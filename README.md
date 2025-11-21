@@ -1,4 +1,4 @@
-# DeepAgent
+# Agentic Coding Assistant
 
 **Deep Agent with Sub-agent Spawning, TODO List Management, and Pluggable File System**
 

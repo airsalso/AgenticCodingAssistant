@@ -1,7 +1,0 @@
-deepagents
-langgraph-cli[inmem]
-langchain-openai
-pytest
-pyright
-wcmatch
-python-dotenv

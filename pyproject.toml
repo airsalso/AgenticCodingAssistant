@@ -14,11 +14,23 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest",
+    "pytest>=7.0.0",
     "pytest-cov",
     "build",
     "twine",
-    "langchain-openai",
+    "langchain-openai>=1.0.0",
+    "pyright>=1.1.0",
+]
+
+# Coding assistant application dependencies
+coding = [
+    "langchain-openai>=1.0.0",
+    "python-dotenv>=1.0.0",
+    "wcmatch>=8.0.0",
+    "langgraph-cli[inmem]>=0.1.0",
+    "langchain-community",
+    "tavily-python",
+    "networkx>=3.0",
 ]
 
 [build-system]
@@ -35,3 +47,53 @@ include = ["deepagents*"]
 
 [tool.setuptools.package-data]
 "*" = ["py.typed"]
+
+# Pytest configuration
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--showlocals",
+]
+
+# Pyright configuration
+[tool.pyright]
+include = ["src"]
+exclude = [
+    "**/__pycache__",
+    ".venv",
+]
+pythonVersion = "3.11"
+typeCheckingMode = "basic"
+reportMissingImports = true
+reportMissingTypeStubs = false
+
+# Ruff configuration
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle (PEP8)
+    "F",   # pyflakes
+    "D",   # pydocstyle (Docstring)
+]
+
+ignore = [
+    "D100",  # 모듈 docstring 없음 허용
+    "D104",  # 패키지 docstring 없음 허용
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"

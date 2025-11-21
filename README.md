@@ -1,495 +1,368 @@
-# 🧠🤖Deep Agents
+# DeepAgent
 
-Using an LLM to call tools in a loop is the simplest form of an agent. 
-This architecture, however, can yield agents that are “shallow” and fail to plan and act over longer, more complex tasks. 
+**Deep Agent with Sub-agent Spawning, TODO List Management, and Pluggable File System**
 
-Applications like “Deep Research”, "Manus", and “Claude Code” have gotten around this limitation by implementing a combination of four things:
-a **planning tool**, **sub agents**, access to a **file system**, and a **detailed prompt**.
+A general-purpose deep agent framework built on [LangGraph](https://langchain-ai.github.io/langgraph/) that provides hierarchical task delegation through sub-agents, intelligent file system operations, and autonomous workflow management.
 
-<img src="deep_agents.png" alt="deep agent" width="600"/>
+## 🌟 Features
 
-`deepagents` is a Python package that implements these in a general purpose way so that you can easily create a Deep Agent for your application. For a full overview and quickstart of `deepagents`, the best resource is our [docs](https://docs.langchain.com/oss/python/deepagents/overview).
+### Core Framework (`src/deepagents`)
 
-**Acknowledgements: This project was primarily inspired by Claude Code, and initially was largely an attempt to see what made Claude Code general purpose, and make it even more so.**
+- **🔄 Sub-agent Spawning**: Delegate complex, multi-step tasks to specialized ephemeral agents
+- **📝 TODO List Management**: Built-in task tracking and planning capabilities
+- **📁 Pluggable File System**: Multiple backend options (State, Store, Filesystem, Composite)
+- **🛠️ Rich Tool Set**: `ls`, `read_file`, `write_file`, `edit_file`, `glob`, `grep`, `delete_file`
+- **🔌 Middleware Architecture**: Extensible middleware for filesystem, summarization, prompt caching, and more
+- **💾 Multiple Storage Backends**: Choose between in-memory state, persistent storage, or hybrid approaches
 
-## Installation
+### Coding Assistant Application (`src/coding`)
+
+A specialized Python code analysis and refactoring agent with:
+
+- **🔍 Impact Analysis**:
+  - **SPEED Mode**: AST-based static analysis (~5s for 10K lines)
+  - **PRECISION Mode**: Pyright LSP type checking
+- **🔧 Autonomous Refactoring**: Self-healing with up to 3 retry attempts
+- **✅ Test Generation**: Automatic pytest test creation
+- **📚 Documentation Sync**: Keep docstrings and README files updated
+- **🌐 Web Search**: Tavily integration for external information
+- **⚡ Performance Optimizations**:
+  - File and analysis result caching
+  - Parallel processing for multi-file operations
+  - Context explosion prevention
+  - Token limit checking
+
+## 📦 Installation
+
+### Basic Installation
 
 ```bash
-# pip
-pip install deepagents
+# Clone the repository
+git clone https://github.com/yourusername/deepagent.git
+cd deepagent
 
-# uv
-uv add deepagents
-
-# poetry
-poetry add deepagents
+# Install core package
+pip install -e .
 ```
 
-## Usage
+### Development Installation
 
-(To run the example below, you will need to `pip install tavily-python`).
+```bash
+# Install with development dependencies
+pip install -e ".[dev]"
+```
 
-Make sure to set `TAVILY_API_KEY` in your environment. You can generate one [here](https://www.tavily.com/).
+### Coding Assistant Installation
+
+```bash
+# Install with coding assistant dependencies
+pip install -e ".[coding]"
+```
+
+## 🚀 Quick Start
+
+### Using the Core Framework
 
 ```python
-import os
-from typing import Literal
-from tavily import TavilyClient
 from deepagents import create_deep_agent
+from deepagents.backends import FilesystemBackend
 
-tavily_client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
-
-# Web search tool
-def internet_search(
-    query: str,
-    max_results: int = 5,
-    topic: Literal["general", "news", "finance"] = "general",
-    include_raw_content: bool = False,
-):
-    """Run a web search"""
-    return tavily_client.search(
-        query,
-        max_results=max_results,
-        include_raw_content=include_raw_content,
-        topic=topic,
-    )
-
-
-# System prompt to steer the agent to be an expert researcher
-research_instructions = """You are an expert researcher. Your job is to conduct thorough research, and then write a polished report.
-
-You have access to an internet search tool as your primary means of gathering information.
-
-## `internet_search`
-
-Use this to run an internet search for a given query. You can specify the max number of results to return, the topic, and whether raw content should be included.
-"""
-
-# Create the deep agent
+# Create a basic agent with file system capabilities
 agent = create_deep_agent(
-    tools=[internet_search],
-    system_prompt=research_instructions,
+    model="anthropic/claude-sonnet-4",
+    system_prompt="You are a helpful assistant.",
 )
 
-# Invoke the agent
-result = agent.invoke({"messages": [{"role": "user", "content": "What is langgraph?"}]})
+# Run the agent
+result = agent.invoke({
+    "messages": [{"role": "user", "content": "Create a hello.txt file"}]
+})
 ```
 
-See [examples/research/research_agent.py](examples/research/research_agent.py) for a more complex example.
+### Using the Coding Assistant
 
-The agent created with `create_deep_agent` is just a LangGraph graph - so you can interact with it (streaming, human-in-the-loop, memory, studio)
-in the same way you would any LangGraph agent.
+```bash
+# Set up environment variables
+cd src/coding
+cp .env.example .env  # Edit with your API keys
 
-## Core Capabilities
-**Planning & Task Decomposition**
-
- Deep Agents include a built-in `write_todos` tool that enables agents to break down complex tasks into discrete steps, track progress, and adapt plans as new information emerges.
-
-**Context Management**
-
- File system tools (`ls`, `read_file`, `write_file`, `edit_file`, `glob`, `grep`) allow agents to offload large context to memory, preventing context window overflow and enabling work with variable-length tool results.
-
-**Subagent Spawning**
-
- A built-in `task` tool enables agents to spawn specialized subagents for context isolation. This keeps the main agent’s context clean while still going deep on specific subtasks.
-
-**Long-term Memory**
-
- Extend agents with persistent memory across threads using LangGraph’s Store. Agents can save and retrieve information from previous conversations.
-
-## Customizing Deep Agents
-
-There are several parameters you can pass to `create_deep_agent` to create your own custom deep agent.
-
-### `model`
-
-By default, `deepagents` uses `"claude-sonnet-4-5-20250929"`. You can customize this by passing any [LangChain model object](https://python.langchain.com/docs/integrations/chat/).
-
-```python
-from langchain.chat_models import init_chat_model
-from deepagents import create_deep_agent
-
-model = init_chat_model("openai:gpt-4o")
-agent = create_deep_agent(
-    model=model,
-)
+# Run the CLI interface
+python run_cli.py
 ```
 
-### `system_prompt`
-Deep Agents come with a built-in system prompt. This is relatively detailed prompt that is heavily based on and inspired by [attempts](https://github.com/kn1026/cc/blob/main/claudecode.md) to [replicate](https://github.com/asgeirtj/system_prompts_leaks/blob/main/Anthropic/claude-code.md)
-Claude Code's system prompt. It was made more general purpose than Claude Code's system prompt. The default prompt contains detailed instructions for how to use the built-in planning tool, file system tools, and sub agents.
+Example session:
+```
+🧑 You: Analyze the impact of changing the calculate_total function in utils.py
 
-Each deep agent tailored to a use case should include a custom system prompt specific to that use case as well. The importance of prompting for creating a successful deep agent cannot be overstated.
-
-```python
-from deepagents import create_deep_agent
-
-research_instructions = """You are an expert researcher. Your job is to conduct thorough research, and then write a polished report.
-"""
-
-agent = create_deep_agent(
-    system_prompt=research_instructions,
-)
+🤖 Assistant: I'll analyze the impact using SPEED mode...
+[Analysis results showing callers, dependencies, and imports]
 ```
 
-### `tools`
-
-Just like with tool-calling agents, you can provide a deep agent with a set of tools that it has access to.
+### Creating Custom Sub-agents
 
 ```python
-import os
-from typing import Literal
-from tavily import TavilyClient
-from deepagents import create_deep_agent
+from deepagents import create_deep_agent, SubAgent
 
-tavily_client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
-
-def internet_search(
-    query: str,
-    max_results: int = 5,
-    topic: Literal["general", "news", "finance"] = "general",
-    include_raw_content: bool = False,
-):
-    """Run a web search"""
-    return tavily_client.search(
-        query,
-        max_results=max_results,
-        include_raw_content=include_raw_content,
-        topic=topic,
-    )
-
-agent = create_deep_agent(
-    tools=[internet_search]
-)
-```
-
-### `middleware`
-`create_deep_agent` is implemented with middleware that can be customized. You can provide additional middleware to extend functionality, add tools, or implement custom hooks. 
-
-```python
-from langchain_core.tools import tool
-from deepagents import create_deep_agent
-from langchain.agents.middleware import AgentMiddleware
-
-@tool
-def get_weather(city: str) -> str:
-    """Get the weather in a city."""
-    return f"The weather in {city} is sunny."
-
-@tool
-def get_temperature(city: str) -> str:
-    """Get the temperature in a city."""
-    return f"The temperature in {city} is 70 degrees Fahrenheit."
-
-class WeatherMiddleware(AgentMiddleware):
-  tools = [get_weather, get_temperature]
-
-agent = create_deep_agent(
-    model="anthropic:claude-sonnet-4-20250514",
-    middleware=[WeatherMiddleware()]
-)
-```
-
-### `subagents`
-
-A main feature of Deep Agents is their ability to spawn subagents. You can specify custom subagents that your agent can hand off work to in the subagents parameter. Sub agents are useful for context quarantine (to help not pollute the overall context of the main agent) as well as custom instructions.
-
-`subagents` should be a list of dictionaries, where each dictionary follow this schema:
-
-```python
-class SubAgent(TypedDict):
-    name: str
-    description: str
-    prompt: str
-    tools: Sequence[BaseTool | Callable | dict[str, Any]]
-    model: NotRequired[str | BaseChatModel]
-    middleware: NotRequired[list[AgentMiddleware]]
-    interrupt_on: NotRequired[dict[str, bool | InterruptOnConfig]]
-
-class CompiledSubAgent(TypedDict):
-    name: str
-    description: str
-    runnable: Runnable
-```
-
-**SubAgent fields:**
-- **name**: This is the name of the subagent, and how the main agent will call the subagent
-- **description**: This is the description of the subagent that is shown to the main agent
-- **prompt**: This is the prompt used for the subagent
-- **tools**: This is the list of tools that the subagent has access to.
-- **model**: Optional model name or model instance.
-- **middleware** Additional middleware to attach to the subagent. See [here](https://docs.langchain.com/oss/python/langchain/middleware) for an introduction into middleware and how it works with create_agent.
-- **interrupt_on** A custom interrupt config that specifies human-in-the-loop interactions for your tools.
-
-**CompiledSubAgent fields:**
-- **name**: This is the name of the subagent, and how the main agent will call the subagent
-- **description**: This is the description of the subagent that is shown to the main agent  
-- **runnable**: A pre-built LangGraph graph/agent that will be used as the subagent
-
-#### Using SubAgent
-
-```python
-import os
-from typing import Literal
-from tavily import TavilyClient
-from deepagents import create_deep_agent
-
-tavily_client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
-
-def internet_search(
-    query: str,
-    max_results: int = 5,
-    topic: Literal["general", "news", "finance"] = "general",
-    include_raw_content: bool = False,
-):
-    """Run a web search"""
-    return tavily_client.search(
-        query,
-        max_results=max_results,
-        include_raw_content=include_raw_content,
-        topic=topic,
-    )
-
-research_subagent = {
-    "name": "research-agent",
-    "description": "Used to research more in depth questions",
-    "system_prompt": "You are a great researcher",
-    "tools": [internet_search],
-    "model": "openai:gpt-4o",  # Optional override, defaults to main agent model
+# Define a specialized sub-agent
+code_reviewer = {
+    "name": "code-reviewer",
+    "description": "Reviews code for best practices and potential issues",
+    "system_prompt": "You are an expert code reviewer...",
+    "tools": [],  # Uses parent agent's tools by default
 }
-subagents = [research_subagent]
 
+# Create agent with sub-agent
 agent = create_deep_agent(
-    model="anthropic:claude-sonnet-4-20250514",
-    subagents=subagents
+    model="anthropic/claude-sonnet-4",
+    subagents=[code_reviewer],
 )
 ```
 
-#### Using CustomSubAgent
+## 🏗️ Architecture
 
-For more complex use cases, you can provide your own pre-built LangGraph graph as a subagent:
+### Core Components
+
+```
+deepagents/
+├── graph.py              # Agent factory and configuration
+├── backends/
+│   ├── protocol.py       # Backend interface protocol
+│   ├── state.py          # LangGraph state backend
+│   ├── store.py          # Persistent store backend
+│   ├── filesystem.py     # Real filesystem backend
+│   └── composite.py      # Hybrid backend routing
+└── middleware/
+    ├── filesystem.py     # File operations middleware
+    ├── subagents.py      # Sub-agent spawning
+    └── patch_tool_calls.py # Tool call correction
+```
+
+### Coding Assistant Components
+
+```
+coding/
+├── coding_agent.py       # Main agent definition
+├── optimizations.py      # Performance utilities
+├── run_cli.py           # CLI interface
+└── test_verification.py  # Testing utilities
+```
+
+## 📖 Documentation
+
+### File System Tools
+
+- **`ls(path)`**: List files in directory
+- **`read_file(file_path, offset=0, limit=2000)`**: Read file contents with line numbers
+- **`write_file(file_path, content)`**: Create new file
+- **`edit_file(file_path, old_string, new_string, replace_all=False)`**: Edit existing file
+- **`glob(pattern, path=".")`**: Find files matching pattern
+- **`grep(pattern, path=".", glob=None, output_mode="files_with_matches")`**: Search in files
+- **`delete_file(file_path)`**: Delete file (requires approval)
+
+### Sub-agent Usage
+
+The `task` tool spawns ephemeral sub-agents for complex tasks:
 
 ```python
-# Create a custom agent graph
-custom_graph = create_agent(
-    model=your_model,
-    tools=specialized_tools,
-    prompt="You are a specialized agent for data analysis..."
-)
+# Agent automatically uses task tool for complex operations
+result = agent.invoke({
+    "messages": [{
+        "role": "user",
+        "content": "Research Python async patterns and create a comprehensive guide"
+    }]
+})
+```
 
-# Use it as a custom subagent
-custom_subagent = CompiledSubAgent(
-    name="data-analyzer",
-    description="Specialized agent for complex data analysis tasks",
-    runnable=custom_graph
-)
+### Backend Options
 
-subagents = [custom_subagent]
+#### 1. State Backend (Default)
+Stores files in LangGraph state - temporary, session-scoped.
+
+```python
+from deepagents.backends import StateBackend
+
+agent = create_deep_agent(backend=StateBackend)
+```
+
+#### 2. Store Backend
+Persistent storage using LangGraph Store.
+
+```python
+from deepagents.backends import StoreBackend
 
 agent = create_deep_agent(
-    model="anthropic:claude-sonnet-4-20250514",
-    tools=[internet_search],
-    system_prompt=research_instructions,
-    subagents=subagents
+    backend=StoreBackend,
+    store=your_store_instance
 )
 ```
 
-### `interrupt_on`
-A common reality for agents is that some tool operations may be sensitive and require human approval before execution. Deep Agents supports human-in-the-loop workflows through LangGraph’s interrupt capabilities. You can configure which tools require approval using a checkpointer.
-
-These tool configs are passed to our prebuilt [HITL middleware](https://docs.langchain.com/oss/python/langchain/middleware#human-in-the-loop) so that the agent pauses execution and waits for feedback from the user before executing configured tools.
+#### 3. Filesystem Backend
+Reads/writes to actual filesystem.
 
 ```python
-from langchain_core.tools import tool
-from deepagents import create_deep_agent
-
-@tool
-def get_weather(city: str) -> str:
-    """Get the weather in a city."""
-    return f"The weather in {city} is sunny."
+from deepagents.backends import FilesystemBackend
 
 agent = create_deep_agent(
-    model="anthropic:claude-sonnet-4-20250514",
-    tools=[get_weather],
-    interrupt_on={
-        "get_weather": {
-            "allowed_decisions": ["approve", "edit", "reject"]
-        },
+    backend=FilesystemBackend(root_dir="/path/to/workspace")
+)
+```
+
+#### 4. Composite Backend
+Hybrid approach with route-based selection.
+
+```python
+from deepagents.backends import CompositeBackend, StateBackend, StoreBackend
+
+backend = CompositeBackend(
+    default=StateBackend(),
+    routes={
+        "/memories/": StoreBackend(),  # Persistent
+        "/tmp/": StateBackend(),        # Temporary
     }
 )
-
 ```
 
-## Deep Agents Middleware
+## ⚙️ Configuration
 
-Deep Agents are built with a modular middleware architecture. As a reminder, Deep Agents have access to:
-- A planning tool
-- A filesystem for storing context and long-term memories
-- The ability to spawn subagents
+### Environment Variables
 
-Each of these features is implemented as separate middleware. When you create a deep agent with `create_deep_agent`, we automatically attach **PlanningMiddleware**, **FilesystemMiddleware** and **SubAgentMiddleware** to your agent.
+```bash
+# Required
+OPENROUTER_API_KEY=your_key_here
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 
-Middleware is a composable concept, and you can choose to add as many or as few middleware to an agent depending on your use case. That means that you can also use any of the aforementioned middleware independently!
+# Optional
+MODEL=moonshotai/kimi-k2-0905
+TAVILY_API_KEY=your_tavily_key  # For web search
+LOG_LEVEL=INFO
+WORKSPACE=/path/to/workspace
 
-### TodoListMiddleware
+# Performance tuning
+CACHE_MAX_SIZE=200
+CACHE_MAX_MEMORY_MB=50
+MAX_FILE_LIST=50
+MAX_WORKERS=8
+```
 
-Planning is integral to solving complex problems. If you’ve used claude code recently, you’ll notice how it writes out a To-Do list before tackling complex, multi-part tasks. You’ll also notice how it can adapt and update this To-Do list on the fly as more information comes in.
-
-**TodoListMiddleware** provides your agent with a tool specifically for updating this To-Do list. Before, and while it executes a multi-part task, the agent is prompted to use the write_todos tool to keep track of what its doing, and what still needs to be done.
+### Coding Agent Configuration
 
 ```python
-from langchain.agents import create_agent
-from langchain.agents.middleware import TodoListMiddleware
+from coding_agent import agent
 
-# TodoListMiddleware is included by default in create_deep_agent
-# You can customize it if building a custom agent
-agent = create_agent(
-    model="anthropic:claude-sonnet-4-20250514",
-    # Custom planning instructions can be added via middleware
-    middleware=[
-        TodoListMiddleware(
-            system_prompt="Use the write_todos tool to..."  # Optional: Custom addition to the system prompt
-        ),
-    ],
+# Configure interrupt behavior
+agent = create_deep_agent(
+    interrupt_on={
+        "delete_file": True,           # Require approval
+        "write_file": False,           # Auto-approve
+        "change_project_directory": False,
+    }
 )
 ```
 
-### FilesystemMiddleware
+## 🔬 Advanced Usage
 
-Context engineering is one of the main challenges in building effective agents. This can be particularly hard when using tools that can return variable length results (ex. web_search, rag), as long ToolResults can quickly fill up your context window.
-**FilesystemMiddleware** provides four tools to your agent to interact with both short-term and long-term memory.
-- **ls**: List the files in your filesystem
-- **read_file**: Read an entire file, or a certain number of lines from a file
-- **write_file**: Write a new file to your filesystem
-- **edit_file**: Edit an existing file in your filesystem
+### Impact Analysis Modes
 
 ```python
-from langchain.agents import create_agent
-from deepagents.middleware.filesystem import FilesystemMiddleware
+from coding_agent import analyze_impact
 
+# Fast static analysis (AST-based)
+result = analyze_impact(
+    file_path="src/utils.py",
+    function_or_class="calculate_total",
+    mode="SPEED"
+)
 
-# FilesystemMiddleware is included by default in create_deep_agent
-# You can customize it if building a custom agent
-agent = create_agent(
-    model="anthropic:claude-sonnet-4-20250514",
-    middleware=[
-        FilesystemMiddleware(
-            backend=..., # Optional: customize storage backend
-            system_prompt="Write to the filesystem when...",  # Optional custom system prompt override
-            custom_tool_descriptions={
-                "ls": "Use the ls tool when...",
-                "read_file": "Use the read_file tool to..."
-            }  # Optional: Custom descriptions for filesystem tools
-        ),
-    ],
+# Precise type checking (Pyright LSP)
+result = analyze_impact(
+    file_path="src/utils.py",
+    function_or_class="calculate_total",
+    mode="PRECISION"  # Auto-fallback to SPEED on failure
 )
 ```
 
-### SubAgentMiddleware
-
-Handing off tasks to subagents is a great way to isolate context, keeping the context window of the main (supervisor) agent clean while still going deep on a task. The subagents middleware allows you supply subagents through a task tool.
-
-A subagent is defined with a name, description, system prompt, and tools. You can also provide a subagent with a custom model, or with additional middleware. This can be particularly useful when you want to give the subagent an additional state key to share with the main agent.
+### Parallel File Processing
 
 ```python
-from langchain_core.tools import tool
-from langchain.agents import create_agent
-from deepagents.middleware.subagents import SubAgentMiddleware
+from coding_agent import analyze_multiple_files
 
-
-@tool
-def get_weather(city: str) -> str:
-    """Get the weather in a city."""
-    return f"The weather in {city} is sunny."
-
-agent = create_agent(
-    model="claude-sonnet-4-20250514",
-    middleware=[
-        SubAgentMiddleware(
-            default_model="claude-sonnet-4-20250514",
-            default_tools=[],
-            subagents=[
-                {
-                    "name": "weather",
-                    "description": "This subagent can get weather in cities.",
-                    "system_prompt": "Use the get_weather tool to get the weather in a city.",
-                    "tools": [get_weather],
-                    "model": "gpt-4.1",
-                    "middleware": [],
-                }
-            ],
-        )
-    ],
+# Analyzes files in parallel (3+ files use 8 workers)
+result = analyze_multiple_files(
+    file_paths=["file1.py", "file2.py", "file3.py"],
+    function_or_class="MyClass",
+    mode="SPEED"
 )
 ```
 
-For more complex use cases, you can also provide your own pre-built LangGraph graph as a subagent.
+### Web Search Integration
 
 ```python
-# Create a custom LangGraph graph
-def create_weather_graph():
-    workflow = StateGraph(...)
-    # Build your custom graph
-    return workflow.compile()
+from coding_agent import search_web
 
-weather_graph = create_weather_graph()
-
-# Wrap it in a CompiledSubAgent
-weather_subagent = CompiledSubAgent(
-    name="weather",
-    description="This subagent can get weather in cities.",
-    runnable=weather_graph
-)
-
-agent = create_agent(
-    model="anthropic:claude-sonnet-4-20250514",
-    middleware=[
-        SubAgentMiddleware(
-            default_model="claude-sonnet-4-20250514",
-            default_tools=[],
-            subagents=[weather_subagent],
-        )
-    ],
+# Search for external information
+result = search_web(
+    query="Python async best practices 2024",
+    max_results=5
 )
 ```
 
-## Sync vs Async
+## 🧪 Testing
 
-Prior versions of deepagents separated sync and async agent factories. 
+```bash
+# Run tests
+pytest
 
-`async_create_deep_agent` has been folded in to `create_deep_agent`.
+# Run with coverage
+pytest --cov=src --cov-report=html
 
-**You should use `create_deep_agent` as the factory for both sync and async agents**
-
-
-## MCP
-
-The `deepagents` library can be ran with MCP tools. This can be achieved by using the [Langchain MCP Adapter library](https://github.com/langchain-ai/langchain-mcp-adapters).
-
-**NOTE:** You will want to use `from deepagents import async_create_deep_agent` to use the async version of `deepagents`, since MCP tools are async
-
-(To run the example below, will need to `pip install langchain-mcp-adapters`)
-
-```python
-import asyncio
-from langchain_mcp_adapters.client import MultiServerMCPClient
-from deepagents import create_deep_agent
-
-async def main():
-    # Collect MCP tools
-    mcp_client = MultiServerMCPClient(...)
-    mcp_tools = await mcp_client.get_tools()
-
-    # Create agent
-    agent = create_deep_agent(tools=mcp_tools, ....)
-
-    # Stream the agent
-    async for chunk in agent.astream(
-        {"messages": [{"role": "user", "content": "what is langgraph?"}]},
-        stream_mode="values"
-    ):
-        if "messages" in chunk:
-            chunk["messages"][-1].pretty_print()
-
-asyncio.run(main())
+# Run specific test file
+pytest tests/test_backends.py
 ```
+
+## 📊 Performance
+
+- **File Caching**: LRU cache with configurable size and memory limits
+- **Analysis Caching**: Results cached by file path, target, and modification time
+- **Parallel Processing**: ThreadPoolExecutor for multi-file operations
+- **Context Management**: Automatic truncation and summarization
+- **Token Optimization**: Prompt caching with Anthropic
+
+## 🤝 Contributing
+
+Contributions are welcome! Please:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## 🙏 Acknowledgments
+
+- Built on [LangGraph](https://github.com/langchain-ai/langgraph)
+- Uses [LangChain](https://github.com/langchain-ai/langchain)
+- Type checking with [Pyright](https://github.com/microsoft/pyright)
+- Web search powered by [Tavily](https://tavily.com)
+
+## 📞 Support
+
+- **Issues**: [GitHub Issues](https://github.com/yourusername/deepagent/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/yourusername/deepagent/discussions)
+- **Documentation**: [Wiki](https://github.com/yourusername/deepagent/wiki)
+
+## 🗺️ Roadmap
+
+- [ ] Additional language support (JavaScript, TypeScript, Java)
+- [ ] Visual Studio Code extension
+- [ ] Web UI for agent interaction
+- [ ] Enhanced monitoring and observability
+- [ ] Multi-agent collaboration patterns
+- [ ] Custom middleware examples and templates
+
+---
+
+**Made with ❤️ by the DeepAgent Team**

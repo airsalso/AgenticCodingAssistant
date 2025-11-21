@@ -7,7 +7,7 @@
 - **DrawIO**: [`coding_agent_architecture.drawio`](coding_agent_architecture.drawio)
   - [Draw.io](https://app.diagrams.net)에서 열어서 편집 가능
   - XML 기반 형식
-    https://github.com/airsalso/AgenticCodingAssistant/blob/main/docs/architecture.png
+    ![image](./architecture.png)
 
     
 

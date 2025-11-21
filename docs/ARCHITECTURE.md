@@ -4,13 +4,12 @@
 
 ## 📊 다이어그램 파일
 
-- **Excalidraw**: [`coding_agent_architecture.excalidraw.json`](coding_agent_architecture.excalidraw.json)
-  - [Excalidraw](https://excalidraw.com)에서 열어서 편집 가능
-  - JSON 형식으로 버전 관리 용이
-
 - **DrawIO**: [`coding_agent_architecture.drawio`](coding_agent_architecture.drawio)
   - [Draw.io](https://app.diagrams.net)에서 열어서 편집 가능
   - XML 기반 형식
+ ![Uploading image.png…]()
+
+    
 
 ## 🏗️ 아키텍처 레이어
 

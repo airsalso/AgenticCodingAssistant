@@ -2,7 +2,7 @@
 # ruff: noqa: E501
 
 from collections.abc import Awaitable, Callable, Sequence
-from typing import Annotated
+from typing import Annotated, Any
 from typing_extensions import NotRequired
 
 import os
@@ -17,7 +17,7 @@ from langchain.agents.middleware.types import (
 from langchain.tools import ToolRuntime
 from langchain.tools.tool_node import ToolCallRequest
 from langchain_core.messages import ToolMessage
-from langchain_core.tools import BaseTool, tool
+from langchain_core.tools import BaseTool, tool, InjectedToolArg
 from langgraph.types import Command
 from typing_extensions import TypedDict
 
@@ -191,7 +191,15 @@ Examples:
 - Search Python files only: `grep(pattern="import", glob="*.py")`
 - Show matching lines: `grep(pattern="error", output_mode="content")`"""
 
-FILESYSTEM_SYSTEM_PROMPT = """## Filesystem Tools `ls`, `read_file`, `write_file`, `edit_file`, `glob`, `grep`
+DELETE_FILE_TOOL_DESCRIPTION = """Delete a file from the filesystem.
+
+Usage:
+- The file_path parameter must be an absolute path, not a relative path
+- This operation cannot be undone - use with caution
+- Only files can be deleted (not directories)
+- The tool will return an error if the file does not exist"""
+
+FILESYSTEM_SYSTEM_PROMPT = """## Filesystem Tools `ls`, `read_file`, `write_file`, `edit_file`, `glob`, `grep`, `delete_file`
 
 You have access to a filesystem which you can interact with using these tools.
 All file paths must start with a /.
@@ -201,32 +209,21 @@ All file paths must start with a /.
 - write_file: write to a file in the filesystem
 - edit_file: edit a file in the filesystem
 - glob: find files matching a pattern (e.g., "**/*.py")
-- grep: search for text within files"""
+- grep: search for text within files
+- delete_file: delete a file from the filesystem (use with caution)"""
 
 
-def _get_backend(backend: BACKEND_TYPES, runtime: ToolRuntime) -> BackendProtocol:
-    """런타임과 설정된 백엔드 정의를 바탕으로 실제 백엔드를 반환한다.
-
-    Args:
-        backend: `BackendProtocol` 구현체 또는 `ToolRuntime`을 입력받는 팩토리.
-        runtime: 현재 LangChain 도구 실행 런타임.
-
-    Returns:
-        파일 작업을 수행할 `BackendProtocol` 구현체.
-    """
-    if callable(backend):
-        return backend(runtime)
-    return backend
+# Removed _get_backend since we'll resolve backends differently
 
 
 def _ls_tool_generator(
-    backend: BackendProtocol | Callable[[ToolRuntime], BackendProtocol],
+    backend: BackendProtocol,
     custom_description: str | None = None,
 ) -> BaseTool:
     """`ls`(파일 목록) 도구 생성기.
 
     Args:
-        backend: 파일 시스템 작업을 담당할 백엔드 또는 런타임을 받아 백엔드를 만드는 팩토리.
+        backend: 파일 시스템 작업을 담당할 백엔드.
         custom_description: 기본 설명 대신 사용할 사용자 정의 문구.
 
     Returns:
@@ -235,23 +232,22 @@ def _ls_tool_generator(
     tool_description = custom_description or LIST_FILES_TOOL_DESCRIPTION
 
     @tool(description=tool_description)
-    def ls(runtime: ToolRuntime[None, FilesystemState], path: str) -> list[str]:
-        resolved_backend = _get_backend(backend, runtime)
+    def ls(path: str) -> list[str]:
         validated_path = _validate_path(path)
-        infos = resolved_backend.ls_info(validated_path)
+        infos = backend.ls_info(validated_path)
         return [fi.get("path", "") for fi in infos]
 
     return ls
 
 
 def _read_file_tool_generator(
-    backend: BackendProtocol | Callable[[ToolRuntime], BackendProtocol],
+    backend: BackendProtocol,
     custom_description: str | None = None,
 ) -> BaseTool:
     """`read_file` 도구 생성기.
 
     Args:
-        backend: 파일 읽기를 처리할 백엔드 또는 런타임을 입력받는 백엔드 팩토리.
+        backend: 파일 읽기를 처리할 백엔드.
         custom_description: 기본 설명을 대체할 사용자 정의 문구.
 
     Returns:
@@ -262,25 +258,23 @@ def _read_file_tool_generator(
     @tool(description=tool_description)
     def read_file(
         file_path: str,
-        runtime: ToolRuntime[None, FilesystemState],
         offset: int = DEFAULT_READ_OFFSET,
         limit: int = DEFAULT_READ_LIMIT,
     ) -> str:
-        resolved_backend = _get_backend(backend, runtime)
         file_path = _validate_path(file_path)
-        return resolved_backend.read(file_path, offset=offset, limit=limit)
+        return backend.read(file_path, offset=offset, limit=limit)
 
     return read_file
 
 
 def _write_file_tool_generator(
-    backend: BackendProtocol | Callable[[ToolRuntime], BackendProtocol],
+    backend: BackendProtocol,
     custom_description: str | None = None,
 ) -> BaseTool:
     """`write_file` 도구 생성기.
 
     Args:
-        backend: 파일 생성을 담당할 백엔드 또는 런타임 입력 기반 백엔드 팩토리.
+        backend: 파일 생성을 담당할 백엔드.
         custom_description: 기본 설명을 덮어쓸 문구.
 
     Returns:
@@ -292,37 +286,24 @@ def _write_file_tool_generator(
     def write_file(
         file_path: str,
         content: str,
-        runtime: ToolRuntime[None, FilesystemState],
-    ) -> Command | str:
-        resolved_backend = _get_backend(backend, runtime)
+    ) -> str:
         file_path = _validate_path(file_path)
-        res: WriteResult = resolved_backend.write(file_path, content)
+        res: WriteResult = backend.write(file_path, content)
         if res.error:
             return res.error
-        # If backend returns state update, wrap into Command with ToolMessage
-        if res.files_update is not None:
-            return Command(update={
-                "files": res.files_update,
-                "messages": [
-                    ToolMessage(
-                        content=f"Updated file {res.path}",
-                        tool_call_id=runtime.tool_call_id,
-                    )
-                ],
-            })
         return f"Updated file {res.path}"
 
     return write_file
 
 
 def _edit_file_tool_generator(
-    backend: BackendProtocol | Callable[[ToolRuntime], BackendProtocol],
+    backend: BackendProtocol,
     custom_description: str | None = None,
 ) -> BaseTool:
     """`edit_file` 도구 생성기.
 
     Args:
-        backend: 문자열 치환을 수행할 백엔드 또는 런타임 기반 백엔드 팩토리.
+        backend: 문자열 치환을 수행할 백엔드.
         custom_description: 기본 설명을 덮어쓸 사용자 정의 문구.
 
     Returns:
@@ -335,38 +316,26 @@ def _edit_file_tool_generator(
         file_path: str,
         old_string: str,
         new_string: str,
-        runtime: ToolRuntime[None, FilesystemState],
         *,
         replace_all: bool = False,
-    ) -> Command | str:
-        resolved_backend = _get_backend(backend, runtime)
+    ) -> str:
         file_path = _validate_path(file_path)
-        res: EditResult = resolved_backend.edit(file_path, old_string, new_string, replace_all=replace_all)
+        res: EditResult = backend.edit(file_path, old_string, new_string, replace_all=replace_all)
         if res.error:
             return res.error
-        if res.files_update is not None:
-            return Command(update={
-                "files": res.files_update,
-                "messages": [
-                    ToolMessage(
-                        content=f"Successfully replaced {res.occurrences} instance(s) of the string in '{res.path}'",
-                        tool_call_id=runtime.tool_call_id,
-                    )
-                ],
-            })
         return f"Successfully replaced {res.occurrences} instance(s) of the string in '{res.path}'"
 
     return edit_file
 
 
 def _glob_tool_generator(
-    backend: BackendProtocol | Callable[[ToolRuntime], BackendProtocol],
+    backend: BackendProtocol,
     custom_description: str | None = None,
 ) -> BaseTool:
     """`glob` 도구 생성기.
 
     Args:
-        backend: 패턴 검색을 수행할 백엔드 또는 런타임 입력 기반 백엔드 팩토리.
+        backend: 패턴 검색을 수행할 백엔드.
         custom_description: 기본 설명을 덮어쓸 문구.
 
     Returns:
@@ -375,22 +344,21 @@ def _glob_tool_generator(
     tool_description = custom_description or GLOB_TOOL_DESCRIPTION
 
     @tool(description=tool_description)
-    def glob(pattern: str, runtime: ToolRuntime[None, FilesystemState], path: str = "/") -> list[str]:
-        resolved_backend = _get_backend(backend, runtime)
-        infos = resolved_backend.glob_info(pattern, path=path)
+    def glob(pattern: str, path: str = ".") -> list[str]:
+        infos = backend.glob_info(pattern, path=path)
         return [fi.get("path", "") for fi in infos]
 
     return glob
 
 
 def _grep_tool_generator(
-    backend: BackendProtocol | Callable[[ToolRuntime], BackendProtocol],
+    backend: BackendProtocol,
     custom_description: str | None = None,
 ) -> BaseTool:
     """`grep` 도구 생성기.
 
     Args:
-        backend: 패턴 검색을 처리할 백엔드 또는 런타임 기반 팩토리.
+        backend: 패턴 검색을 처리할 백엔드.
         custom_description: 기본 설명을 덮어쓸 문구.
 
     Returns:
@@ -401,19 +369,40 @@ def _grep_tool_generator(
     @tool(description=tool_description)
     def grep(
         pattern: str,
-        runtime: ToolRuntime[None, FilesystemState],
-        path: Optional[str] = None,
+        path: Optional[str] = ".",
         glob: str | None = None,
         output_mode: Literal["files_with_matches", "content", "count"] = "files_with_matches",
     ) -> str:
-        resolved_backend = _get_backend(backend, runtime)
-        raw = resolved_backend.grep_raw(pattern, path=path, glob=glob)
+        raw = backend.grep_raw(pattern, path=path, glob=glob)
         if isinstance(raw, str):
             return raw
         formatted = format_grep_matches(raw, output_mode)
         return truncate_if_too_long(formatted)  # type: ignore[arg-type]
 
     return grep
+
+
+def _delete_file_tool_generator(
+    backend: BackendProtocol,
+    custom_description: str | None = None,
+) -> BaseTool:
+    """`delete_file` 도구 생성기.
+
+    Args:
+        backend: 파일 삭제를 처리할 백엔드.
+        custom_description: 기본 설명을 덮어쓸 문구.
+
+    Returns:
+        파일을 삭제하는 `BaseTool`.
+    """
+    tool_description = custom_description or DELETE_FILE_TOOL_DESCRIPTION
+
+    @tool(description=tool_description)
+    def delete_file(file_path: str) -> str:
+        file_path = _validate_path(file_path)
+        return backend.delete(file_path)
+
+    return delete_file
 
 
 TOOL_GENERATORS = {
@@ -423,6 +412,7 @@ TOOL_GENERATORS = {
     "edit_file": _edit_file_tool_generator,
     "glob": _glob_tool_generator,
     "grep": _grep_tool_generator,
+    "delete_file": _delete_file_tool_generator,
 }
 
 
@@ -512,13 +502,54 @@ class FilesystemMiddleware(AgentMiddleware):
         """
         self.tool_token_limit_before_evict = tool_token_limit_before_evict
 
-        # Use provided backend or default to StateBackend factory
-        self.backend = backend if backend is not None else (lambda rt: StateBackend(rt))
+        # Resolve backend immediately - if it's a factory, we can't use it directly in tools
+        # StateBackend factory will be handled by creating tools only when needed
+        if backend is not None:
+            if callable(backend):
+                # Backend is a factory - we'll create a wrapper that resolves it
+                self.backend_factory = backend
+                self.backend = None  # Will be resolved when tools are used
+            else:
+                self.backend = backend
+                self.backend_factory = None
+        else:
+            # Default: use StateBackend factory
+            self.backend_factory = lambda rt: StateBackend(rt)
+            self.backend = None
 
         # Set system prompt (allow full override)
         self.system_prompt = system_prompt if system_prompt is not None else FILESYSTEM_SYSTEM_PROMPT
 
-        self.tools = _get_filesystem_tools(self.backend, custom_tool_descriptions)
+        # Tools will be created lazily when needed, or we need to resolve backend now
+        # For simplicity, we'll require backend to be resolved before creating tools
+        # This means FilesystemMiddleware must resolve factories in before_agent
+        self.custom_tool_descriptions = custom_tool_descriptions
+        self.tools = []  # Will be populated in before_agent
+
+    def before_agent(self, state: AgentState, runtime: Any) -> dict[str, Any] | None:  # noqa: ANN401
+        """에이전트 실행 전에 백엔드를 해결하고 도구를 생성한다."""
+        # Only resolve backend and create tools once
+        if not self.tools:
+            if self.backend is None and self.backend_factory is not None:
+                # Resolve backend from factory using runtime
+                from langchain.tools import ToolRuntime
+                if hasattr(runtime, 'state') and hasattr(runtime, 'store'):
+                    # Verify runtime has required ToolRuntime interface
+                    self.backend = self.backend_factory(runtime)  # type: ignore
+                else:
+                    # Runtime doesn't have necessary attributes, use StateBackend directly
+                    from deepagents.backends import StateBackend
+                    # Only create StateBackend if runtime has 'state' attribute
+                    if hasattr(runtime, 'state'):
+                        self.backend = StateBackend(runtime)  # type: ignore
+                    else:
+                        raise ValueError(f"Runtime object does not have required 'state' attribute")
+
+            # Create tools with resolved backend
+            if self.backend is not None:
+                self.tools = _get_filesystem_tools(self.backend, self.custom_tool_descriptions)
+
+        return None
 
     def wrap_model_call(
         self,
